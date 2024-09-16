@@ -471,7 +471,9 @@ cdef extern from "slurm/slurm.h":
     uint8_t ASSOC_MGR_INFO_FLAG_USERS
     uint8_t ASSOC_MGR_INFO_FLAG_QOS
     uint8_t KILL_JOB_BATCH
+
     uint8_t KILL_ARRAY_TASK
+
     uint8_t KILL_STEPS_ONLY
     uint8_t KILL_FULL_JOB
     uint8_t KILL_FED_REQUEUE
