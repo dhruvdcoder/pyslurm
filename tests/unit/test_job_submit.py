@@ -238,18 +238,25 @@ def test_validate_cpus():
 def test_parse_signal():
     signal = 7
     signal_dict = _parse_signal_str_to_dict(signal)
-    assert signal_dict["signal"] == "7"
+    assert signal_dict["signal"] == 7
     assert len(signal_dict) == 1
 
     signal = "7@120"
     signal_dict = _parse_signal_str_to_dict(signal)
-    assert signal_dict["signal"] == "7"
+    assert signal_dict["signal"] == 7
     assert signal_dict["time"] == "120"
     assert len(signal_dict) == 2
 
+    signal = "B:SIGUSR2@60"
+    signal_dict = _parse_signal_str_to_dict(signal)
+    assert signal_dict["signal"] == 12
+    assert signal_dict["time"] == "60"
+    assert signal_dict["batch_only"]
+    assert len(signal_dict) == 3
+
     signal = "RB:8@180"
     signal_dict = _parse_signal_str_to_dict(signal)
-    assert signal_dict["signal"] == "8"
+    assert signal_dict["signal"] == 8
     assert signal_dict["time"] == "180"
     assert signal_dict["batch_only"]
     assert signal_dict["allow_reservation_overlap"]
@@ -350,6 +357,7 @@ def test_parsing_sbatch_options_from_script():
                 #SBATCH --exclusive
                 #SBATCH --ntasks     =    2
                 #SBATCH -c=3 # inline-comments should be ignored
+                #SBATCH --gres-flags=one-task-per-sharing,enforce-binding
 
                 sleep 1000
                 """
@@ -364,8 +372,10 @@ def test_parsing_sbatch_options_from_script():
         assert job.resource_sharing == "no"
         assert job.ntasks == 5
         assert job.cpus_per_task == "3"
+        assert job.gres_tasks_per_sharing == "one-task-per-sharing"
+        assert job.gres_binding == "enforce-binding"
 
-        job = job_desc(ntasks=5)
+        job = job_desc(ntasks=5, gres_binding="disable-binding")
         job.script = path
         job.load_sbatch_options(overwrite=True)
         assert job.time_limit == "20"
@@ -374,6 +384,8 @@ def test_parsing_sbatch_options_from_script():
         assert job.resource_sharing == "no"
         assert job.ntasks == "2"
         assert job.cpus_per_task == "3"
+        assert job.gres_tasks_per_sharing == "one-task-per-sharing"
+        assert job.gres_binding == "enforce-binding"
     finally:
             os.remove(path)
-    
+

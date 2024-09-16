@@ -97,7 +97,7 @@ def user_to_uid(user, err_on_invalid=True):
     try:
         if isinstance(user, str) and not user.isdigit():
             return getpwnam(user).pw_uid
-        
+
         return getpwuid(int(user)).pw_uid
     except KeyError as e:
         if err_on_invalid:
@@ -175,17 +175,17 @@ def nodelist_from_range_str(nodelist):
 
     cdef:
         char *nl = nodelist
-        slurm.hostlist_t hl
+        slurm.hostlist_t *hl
         char *hl_unranged = NULL
 
     hl = slurm.slurm_hostlist_create(nl)
     if not hl:
         return []
 
-    hl_unranged = slurm.slurm_hostlist_deranged_string_malloc(hl)
+    hl_unranged = slurm.slurm_hostlist_deranged_string_xmalloc(hl)
     out = cstr.to_list(hl_unranged)
 
-    free(hl_unranged)
+    xfree(hl_unranged)
     slurm.slurm_hostlist_destroy(hl)
 
     return out
@@ -206,20 +206,20 @@ def nodelist_to_range_str(nodelist):
 
     cdef:
         char *nl = nodelist
-        slurm.hostlist_t hl
+        slurm.hostlist_t *hl
         char *hl_ranged = NULL
-    
+
     hl = slurm.slurm_hostlist_create(nl)
     if not hl:
         return None
 
-    hl_ranged = slurm.slurm_hostlist_ranged_string_malloc(hl)
+    hl_ranged = slurm.slurm_hostlist_ranged_string_xmalloc(hl)
     out = cstr.to_unicode(hl_ranged)
 
-    free(hl_ranged)
+    xfree(hl_ranged)
     slurm.slurm_hostlist_destroy(hl)
 
-    return out 
+    return out
 
 
 def humanize(num, decimals=1):
@@ -378,3 +378,12 @@ def dehumanize_step_id(sid):
         return slurm.SLURM_PENDING_STEP
     else:
         return int(sid)
+
+
+cpdef gres_from_tres_dict(dict tres_dict):
+    gres_prefix = "gres/"
+    return {
+        k.replace(gres_prefix, ""):v
+        for k, v in tres_dict.items()
+        if gres_prefix in k
+    }

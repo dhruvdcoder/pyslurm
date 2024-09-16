@@ -70,9 +70,9 @@ cdef fmalloc(char **old, val):
     # allow for a denial of service attack on services that use pyslurm.
     cdef:
         const char *tmp = NULL
-        size_t siz
+        size_t size
 
-    # Free the previous allocation (if neccessary)
+    # Free the previous allocation (if necessary)
     xfree(old[0])
 
     # Consider: Maybe every string containing a \0 should just
@@ -85,13 +85,13 @@ cdef fmalloc(char **old, val):
         tmp = val
 
         # Get the length of the char*, include space for NUL character
-        siz = <size_t>strlen(tmp) + 1
+        size = <size_t>strlen(tmp) + 1
 
-        old[0] = <char *>slurm.try_xmalloc(siz)
+        old[0] = <char *>slurm.try_xmalloc(size)
         if not old[0]:
             raise MemoryError("xmalloc failed for char*")
 
-        memcpy(old[0], tmp, siz)
+        memcpy(old[0], tmp, size)
     else:
         old[0] = NULL
 
@@ -133,7 +133,7 @@ cpdef dict to_dict(char *str_dict, str delim1=",", str delim2="="):
     which can easily be converted to a dict.
     """
     cdef:
-        str _str_dict = to_unicode(str_dict) 
+        str _str_dict = to_unicode(str_dict)
         str key, val
         dict out = {}
 
@@ -143,7 +143,7 @@ cpdef dict to_dict(char *str_dict, str delim1=",", str delim2="="):
     for kv in _str_dict.split(delim1):
         if delim2 in kv:
             key, val = kv.split(delim2, 1)
-            out[key] = val
+            out[key] = int(val) if val.isdigit() else val
 
     return out
 
@@ -158,7 +158,7 @@ def validate_str_key_value_format(val, delim1=",", delim2="="):
         else:
             raise ValueError(
                 f"Invalid format for key-value pair {kv}. "
-                f"Expected {delim2} as seperator."
+                f"Expected {delim2} as separator."
             )
 
     return out
@@ -184,10 +184,10 @@ def dict_to_str(vals, prepend=None, delim1=",", delim2="="):
 
     if isinstance(vals, str):
         tmp_dict = validate_str_key_value_format(vals, delim1, delim2)
-    
+
     for k, v in tmp_dict.items():
         if ((delim1 in str(k) or delim2 in str(k)) or
-                delim1 in str(v) or delim2 in str(v)):    
+                delim1 in str(v) or delim2 in str(v)):
             raise ValueError(
                 f"Key or Value cannot contain either {delim1} or {delim2}. "
                 f"Got Key: {k} and Value: {v}."
@@ -208,29 +208,40 @@ cpdef dict to_gres_dict(char *gres):
     cdef:
         dict output = {}
         str gres_str = to_unicode(gres)
+        str gres_delim = "gres:"
 
     if not gres_str or gres_str == "(null)":
         return {}
 
     for item in re.split(",(?=[^,]+?:)", gres_str):
+        # char *gres might contain just "gres:gpu", without any count.
+        # If not given, the count is always 1, so default to it.
+        cnt = typ = "1"
 
         # Remove the additional "gres" specifier if it exists
-        if "gres:" in item:
-            item = item.replace("gres:", "")
+        if gres_delim in item:
+            item = item.replace(gres_delim, "")
 
         gres_splitted = re.split(
-            ":(?=[^:]+?)", 
+            ":(?=[^:]+?)",
             item.replace("(", ":", 1).replace(")", "")
         )
+        gres_splitted_len = len(gres_splitted)
 
-        name, typ, cnt = gres_splitted[0], gres_splitted[1], 0 
+        name = gres_splitted[0]
+        if gres_splitted_len > 1:
+            typ = gres_splitted[1]
 
         # Check if we have a gres type.
         if typ.isdigit():
             cnt = typ
             typ = None
-        else:
+        elif gres_splitted_len > 2:
             cnt = gres_splitted[2]
+        else:
+            # String is somehow malformed, should never happen when the input
+            # comes from the slurmctld. Ignore if it happens.
+            continue
 
         # Dict Key-Name depends on if we have a gres type or not
         name_and_typ = f"{name}:{typ}" if typ else name
@@ -243,10 +254,10 @@ cpdef dict to_gres_dict(char *gres):
             # Cover cases with IDX
             idx = gres_splitted[3] if not typ else gres_splitted[4]
             output[name_and_typ] = {
-                "count": cnt,
+                "count": int(cnt),
                 "indexes": idx,
             }
-            
+
     return output
 
 

@@ -29,6 +29,10 @@ from typing import Any
 from pyslurm.utils.uint import *
 from pyslurm.settings import LOCAL_CLUSTER
 from pyslurm import xcollections
+from pyslurm.db.stats import (
+    reset_stats_for_job_collection,
+    add_stats_to_job_collection,
+)
 from pyslurm.utils.ctime import (
     date_to_timestamp,
     timestr_to_mins,
@@ -146,6 +150,9 @@ cdef class JobFilter:
         if self.nodelist:
             cstr.fmalloc(&ptr.used_nodes,
                          nodelist_to_range_str(self.nodelist))
+
+        if self.truncate_time:
+            ptr.flags &= ~slurm.JOBCOND_FLAG_NO_TRUNC
             
         if self.ids:
             # These are only allowed by the slurmdbd when specific jobs are
@@ -196,6 +203,7 @@ cdef class Jobs(MultiClusterMap):
                          val_type=Job,
                          id_attr=Job.id,
                          key_type=int)
+        self._reset_stats()
 
     @staticmethod
     def load(JobFilter db_filter=None, Connection db_connection=None):
@@ -216,7 +224,7 @@ cdef class Jobs(MultiClusterMap):
 
         Raises:
             RPCError: When getting the Jobs from the Database was not
-                sucessful
+                successful
 
         Examples:
             Without a Filter the default behaviour applies, which is
@@ -270,19 +278,39 @@ cdef class Jobs(MultiClusterMap):
         # convert them to its type name for the user in advance.
 
         # TODO: How to handle the possibility of duplicate job ids that could
-        # appear if IDs on a cluster are resetted?
+        # appear if IDs on a cluster are reset?
         for job_ptr in SlurmList.iter_and_pop(job_data):
             job = Job.from_ptr(<slurmdb_job_rec_t*>job_ptr.data)
             job.qos_data = qos_data
             job._create_steps()
-            JobStatistics._sum_step_stats_for_job(job, job.steps)
+            job.stats = JobStatistics.from_job_steps(job)
 
             cluster = job.cluster
             if cluster not in out.data:
                 out.data[cluster] = {}
             out[cluster][job.id] = job
 
+            add_stats_to_job_collection(out, job.stats)
+            out.cpus += job.cpus
+            out.nodes += job.num_nodes
+            out.memory += job.memory
+
         return out
+
+    def _reset_stats(self):
+        reset_stats_for_job_collection(self)
+        self.cpus = 0
+        self.nodes = 0
+        self.memory = 0
+
+    def calc_stats(self):
+        """(Re)Calculate Statistics for the Job Collection."""
+        self._reset_stats()
+        for job in self.values():
+            add_stats_to_job_collection(self, job.stats)
+            self.cpus += job.cpus
+            self.nodes += job.num_nodes
+            self.memory += job.memory
 
     @staticmethod
     def modify(db_filter, Job changes, db_connection=None):
@@ -445,7 +473,6 @@ cdef class Job:
         cdef Job wrap = Job.__new__(Job)
         wrap.ptr = in_ptr
         wrap.steps = JobSteps.__new__(JobSteps)
-        wrap.stats = JobStatistics()
         return wrap
 
     @staticmethod
@@ -470,7 +497,7 @@ cdef class Job:
 
         Raises:
             RPCError: If requesting the information for the database Job was
-                not sucessful.
+                not successful.
 
         Examples:
             >>> import pyslurm
@@ -738,7 +765,7 @@ cdef class Job:
         else:
             # Job is still pending, so we return the number of requested cpus
             # instead.
-            return u32_parse(self.ptr.req_cpus)
+            return u32_parse(self.ptr.req_cpus, on_noval=0, zero_is_noval=False)
 
     @property
     def memory(self):
@@ -811,7 +838,7 @@ cdef class Job:
 
     @property
     def user_name(self):
-        # Theres also a ptr->user
+        # There's also a ptr->user
         # https://github.com/SchedMD/slurm/blob/6365a8b7c9480c48678eeedef99864d8d3b6a6b5/src/sacct/print.c#L1946
         return uid_to_name(self.ptr.uid)
 
